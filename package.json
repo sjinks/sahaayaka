@@ -15,7 +15,7 @@
     "lint:fix": "eslint . --fix",
     "test": "tsx --test test/*.test.ts",
     "check": "npm run build && npm run lint && npm test",
-    "compile": "bun build --compile --no-compile-autoload-bunfig --outfile=sahaayaka --minify src/main.ts"
+    "compile": "bun build --compile --no-compile-autoload-dotenv --no-compile-autoload-bunfig --outfile=sahaayaka --minify src/main.ts"
   },
   "dependencies": {
     "minimatch": "^11.0.9",

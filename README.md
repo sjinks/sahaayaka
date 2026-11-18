@@ -14,7 +14,7 @@ conditionally.
    default. [GitHub App webhook setup](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/using-webhooks-with-github-apps)
 2. Generate a private key in the app settings, record the numeric App ID, and
    install the app on the repositories it should monitor.
-3. Start Sahaayaka using the instructions below.
+3. Start Sahaayaka locally or [deploy it with systemd](#deploy-with-systemd).
 
 For an existing GitHub App, update the settings in GitHub and have an
 installation owner approve any new permissions.
@@ -33,13 +33,54 @@ npm start
 ```
 
 `npm run dev` runs TypeScript directly. `npm run check` builds, lints, and tests.
-The app listens on `127.0.0.1:3000` by default. Use `HOST` and `PORT` to
+The app listens on `127.0.0.1:4500` by default. Use `HOST` and `PORT` to
 override the listener address.
 
 For local testing, set `REPOSITORY_ALLOWLIST=owner/test-repository` to limit
 discovery, polling, and webhook processing to that repository. The setting
 accepts comma-separated `owner/repository` names. Omit it to process all
 repositories accessible to the app.
+
+## Deploy with systemd
+
+Run `npm ci` and `npm run compile` with Bun 1.4 or newer on Linux for the
+deployment architecture. The build produces `./sahaayaka`. Install it as
+`/opt/sahaayaka/sahaayaka`, the path used by the
+[`sahaayaka.service`](systemd/sahaayaka.service) unit.
+
+```sh
+sudo install -d -m 0755 /opt/sahaayaka
+sudo install -m 0755 ./sahaayaka /opt/sahaayaka/sahaayaka
+sudo install -d -m 0700 /etc/sahaayaka
+```
+
+Create these root-owned files with mode `0600` before starting the service.
+
+| File                             | Contents                                                                            |
+| -------------------------------- | ----------------------------------------------------------------------------------- |
+| `/etc/sahaayaka/sahaayaka.env`   | `APP_ID=<numeric app ID>` and any optional settings such as `REPOSITORY_ALLOWLIST`. |
+| `/etc/sahaayaka/private-key.pem` | The GitHub App private key.                                                         |
+| `/etc/sahaayaka/webhook-secret`  | The webhook secret from the GitHub App settings, with an optional final newline.    |
+
+systemd passes both secrets as credential files and creates the service
+account and the persistent SQLite state directory at `/var/lib/sahaayaka`.
+`sahaayaka.env` supplies the service environment. The compiled binary skips
+automatic loading of local `.env` files.
+`WEBHOOK_SECRET_FILE` takes precedence over `WEBHOOK_SECRET` when set.
+
+```sh
+sudo install -m 0644 systemd/sahaayaka.service /etc/systemd/system/sahaayaka.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now sahaayaka.service
+sudo journalctl -u sahaayaka.service -n 50
+curl --fail http://127.0.0.1:4500/readyz
+```
+
+Forward the public HTTPS webhook endpoint to
+`http://127.0.0.1:4500/api/github/webhooks` through your reverse proxy.
+`/readyz` returns 200 after initial GitHub discovery. If you increase
+`SHUTDOWN_TIMEOUT_MS` to 40000 or higher, set `TimeoutStopSec` in a systemd
+drop-in to allow more time than the app's shutdown timeout.
 
 ## Require the aggregate check
 

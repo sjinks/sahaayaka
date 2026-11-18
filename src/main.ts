@@ -1,4 +1,4 @@
-import { accessSync, constants } from 'node:fs';
+import { accessSync, constants, readFileSync } from 'node:fs';
 import { type IncomingMessage, type ServerResponse, createServer } from 'node:http';
 import { createNodeMiddleware, createProbot } from 'probot';
 import { type Runtime, register } from './app.js';
@@ -11,17 +11,25 @@ const settings = readSettings();
 if (!process.env.PRIVATE_KEY && !process.env.PRIVATE_KEY_PATH) {
     throw new Error('Set PRIVATE_KEY or PRIVATE_KEY_PATH.');
 }
+
 if (!process.env.PRIVATE_KEY && process.env.PRIVATE_KEY_PATH) {
     accessSync(process.env.PRIVATE_KEY_PATH, constants.R_OK);
 }
-if (process.env.NODE_ENV === 'production' && !process.env.WEBHOOK_SECRET) {
-    throw new Error('WEBHOOK_SECRET is required in production.');
+
+const webhookSecret = process.env.WEBHOOK_SECRET_FILE
+    ? readFileSync(process.env.WEBHOOK_SECRET_FILE, 'utf-8').replace(/\r?\n$/u, '')
+    : process.env.WEBHOOK_SECRET;
+
+if (process.env.NODE_ENV === 'production' && !webhookSecret) {
+    throw new Error('Set WEBHOOK_SECRET or WEBHOOK_SECRET_FILE in production.');
 }
 
-const probot = createProbot();
+const probot = createProbot({ overrides: { secret: webhookSecret ?? '' } });
 await probot.ready();
+
 const store = new Store(process.env.DATABASE_PATH ?? './data/sahaayaka.sqlite');
 const maintenance = new Maintenance(store, settings.retentionMs, probot.log);
+
 let runtime: Runtime | undefined;
 const health = new Health(
     () => runtime?.status(),
@@ -29,6 +37,7 @@ const health = new Health(
     () => maintenance.status(),
     settings.maxDiscoveryAgeMs,
 );
+
 const middleware = await createNodeMiddleware(
     (app, options) => {
         runtime = register(app, store, settings.appId, settings.interval, settings.repositories);
@@ -49,10 +58,12 @@ const server = createServer((request, response) => {
         response.end();
     });
 });
+
 await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
     server.listen(settings.port, settings.host, resolve);
 });
+
 probot.log.info({ host: settings.host, port: settings.port }, 'Sahaayaka is listening');
 
 let proxy: { close(): void } | undefined;
@@ -79,6 +90,7 @@ async function stop(): Promise<void> {
         process.exit(1);
     }, settings.shutdownTimeoutMs);
     deadline.unref();
+
     try {
         await new Promise<void>((resolve, reject) => {
             server.close((error) => {
@@ -94,15 +106,18 @@ async function stop(): Promise<void> {
         clearTimeout(deadline);
     }
 }
+
 function shutdown(): void {
     if (stopping) {
         return;
     }
+
     stopping = true;
     void stop().catch(() => {
         probot.log.error('Graceful shutdown failed');
         process.exit(1);
     });
 }
+
 process.once('SIGINT', shutdown);
 process.once('SIGTERM', shutdown);

@@ -6,7 +6,7 @@ void test('settings apply bounded defaults and normalize the repository allowlis
     const defaults = readSettings({ APP_ID: '42' });
     assert.equal(defaults.appId, 42);
     assert.equal(defaults.interval, 30_000);
-    assert.equal(defaults.port, 3000);
+    assert.equal(defaults.port, 4500);
     assert.equal(defaults.host, '127.0.0.1');
     assert.equal(defaults.shutdownTimeoutMs, 30_000);
     assert.equal(defaults.retentionMs, 30 * 86_400_000);
