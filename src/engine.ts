@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Gateway, Pull } from './github.js';
 import { Store } from './store.js';
-import { evaluate } from './policy.js';
+import { type Policy, evaluate } from './policy.js';
 import { isRateLimitError } from './retry.js';
 import type { Outcome, Target } from './types.js';
 
@@ -78,7 +78,10 @@ export class Engine {
             if (!this.current(target) || revisionChanged(target, freshPull) || freshPull.closed) {
                 return;
             }
-            await this.finish(target, github, outcome, policy.approve && !freshPull.draft);
+            await this.finish(target, github, outcome, {
+                approve: policy.approve && !freshPull.draft,
+                commentOnApproval: policy.commentOnApproval,
+            });
         } catch (error) {
             if (!isRateLimitError(error)) {
                 await this.fail(target, github);
@@ -152,8 +155,13 @@ export class Engine {
         return target;
     }
 
-    private async finish(target: Target, github: Gateway, outcome: Outcome, allowApprove: boolean): Promise<void> {
-        if (outcome.state !== 'success' || !allowApprove) {
+    private async finish(
+        target: Target,
+        github: Gateway,
+        outcome: Outcome,
+        approval: Pick<Policy, 'approve' | 'commentOnApproval'>,
+    ): Promise<void> {
+        if (outcome.state !== 'success' || !approval.approve) {
             await github.dismiss(target);
             if (!this.current(target)) {
                 return;
@@ -171,8 +179,8 @@ export class Engine {
             target.signature = signature;
             this.store.put(target);
         }
-        if (outcome.state === 'success' && allowApprove && target.reviewId === null) {
-            const reviewId = await github.approve(target);
+        if (outcome.state === 'success' && approval.approve && target.reviewId === null) {
+            const reviewId = await github.approve(target, approval.commentOnApproval);
             if (!this.current(target)) {
                 // Record first so a subsequent reconciliation can dismiss it.
                 const current = this.store.get(target.key);
