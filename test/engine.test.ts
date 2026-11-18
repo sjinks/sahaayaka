@@ -324,6 +324,7 @@ void test('review is opt-in and is dismissed for draft, failed, or opted-out gat
     let now = 20_000;
     const engine = new Engine(store, () => now);
     const fake = fakeGateway();
+    const approve = t.mock.method(fake.gateway, 'approve');
     await engine.reconcile('1:2', fake.gateway);
     now += 11_000;
     await engine.reconcile('1:2', fake.gateway);
@@ -331,14 +332,17 @@ void test('review is opt-in and is dismissed for draft, failed, or opted-out gat
     fake.setPolicy({ approve: true });
     await engine.reconcile('1:2', fake.gateway);
     assert.equal(store.get('1:2')?.reviewId, 20);
+    assert.equal(approve.mock.calls[0]?.arguments[1], true);
     let dismisses = fake.calls.filter((call) => call === 'dismiss').length;
     fake.setPull({ draft: true });
     await engine.reconcile('1:2', fake.gateway);
     assert.equal(store.get('1:2')?.reviewId, null);
     assert.ok(fake.calls.filter((call) => call === 'dismiss').length > dismisses);
     fake.setPull({ draft: false });
+    fake.setPolicy({ approve: true, commentOnApproval: false });
     await engine.reconcile('1:2', fake.gateway);
     assert.equal(fake.calls.filter((call) => call === 'approve').length, 2);
+    assert.equal(approve.mock.calls[1]?.arguments[1], false);
     fake.setSnapshot({
         checks: [{ key: 'head:build', name: 'build', appId: 1, status: 'completed', conclusion: 'failure', url: '' }],
         files: ['src/index.ts'],

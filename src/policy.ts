@@ -9,18 +9,29 @@ const requirementSchema = z.strictObject({
     ignorePaths: z.array(z.string().min(1)).optional(),
 });
 
+const policyFields = {
+    approve: z.boolean(),
+    commentOnApproval: z.boolean(),
+    settleSeconds: z.number().int().min(10).max(600),
+    timeoutSeconds: z.number().int().min(60).max(604800),
+    allowEmpty: z.boolean(),
+    allowedConclusions: z.array(z.enum(['success', 'neutral', 'skipped'])).min(1),
+    requiredChecks: z.array(requirementSchema),
+};
+
+export const policyOverridesSchema = z.strictObject(policyFields).partial();
+
 export const policySchema = z.strictObject({
-    approve: z.boolean().default(false),
-    settleSeconds: z.number().int().min(10).max(600).default(30),
-    timeoutSeconds: z.number().int().min(60).max(604800).default(3600),
-    allowEmpty: z.boolean().default(false),
-    allowedConclusions: z
-        .array(z.enum(['success', 'neutral', 'skipped']))
-        .min(1)
-        .default(['success', 'skipped', 'neutral']),
-    requiredChecks: z.array(requirementSchema).default([]),
+    approve: policyFields.approve.default(false),
+    commentOnApproval: policyFields.commentOnApproval.default(true),
+    settleSeconds: policyFields.settleSeconds.default(30),
+    timeoutSeconds: policyFields.timeoutSeconds.default(3600),
+    allowEmpty: policyFields.allowEmpty.default(false),
+    allowedConclusions: policyFields.allowedConclusions.default(['success', 'skipped', 'neutral']),
+    requiredChecks: policyFields.requiredChecks.default([]),
 });
 
+export type PolicyOverrides = z.infer<typeof policyOverridesSchema>;
 export type Policy = z.infer<typeof policySchema>;
 
 function applies(requirement: Policy['requiredChecks'][number], files: string[]): boolean {

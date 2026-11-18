@@ -66,7 +66,7 @@ void test('webhooks and polling keep the aggregate check current across reopen',
                 changed_files: 1,
             };
         }
-        if (decodeURIComponent(call.path).endsWith('/contents/.github/sahaayaka.json')) {
+        if (decodeURIComponent(call.path) === '/repos/owner/repo/contents/.github/sahaayaka.json') {
             return {
                 type: 'file',
                 encoding: 'base64',
@@ -136,6 +136,15 @@ void test('webhooks and polling keep the aggregate check current across reopen',
         const body = typeof init?.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : null;
         const call = { path: url.pathname, method: init?.method ?? 'GET', body, query: url.searchParams };
         calls.push(call);
+        if (
+            call.method === 'GET' &&
+            decodeURIComponent(call.path) === '/repos/owner/.github/contents/.github/sahaayaka.json'
+        ) {
+            assert.equal(call.query.has('ref'), false);
+            const response = new Response(null, { status: 404 });
+            Object.defineProperty(response, 'url', { value: url.href });
+            return Promise.resolve(response);
+        }
         const data = call.method === 'GET' ? read(call) : write(call);
         if (data === undefined) {
             unexpected.push(`${call.method} ${call.path}`);

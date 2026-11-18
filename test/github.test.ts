@@ -39,7 +39,10 @@ function client(handler: (call: Call) => unknown): ProbotOctokit {
         const url = new URL(input instanceof Request ? input.url : String(input));
         const body: unknown = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
         const response = handler({ path: url.pathname, method: init?.method ?? 'GET', body, query: url.searchParams });
-        const result = new Response(JSON.stringify(response), { headers: { 'content-type': 'application/json' } });
+        const result =
+            response instanceof Response
+                ? response
+                : new Response(JSON.stringify(response), { headers: { 'content-type': 'application/json' } });
         Object.defineProperty(result, 'url', { value: url.href });
         return Promise.resolve(result);
     };
@@ -200,6 +203,35 @@ void test('recovering a created check after a crash does not create another chec
     assert.equal(await github.create(target), 25);
 });
 
+void test('approval can omit the review message while targeting the same commit', async () => {
+    const reviews: unknown[] = [];
+    const github = new GitHub(
+        client((call) => {
+            if (call.path === '/app') {
+                return { slug: 'sahaayaka' };
+            }
+            if (call.path.endsWith('/reviews') && call.method === 'GET') {
+                return [];
+            }
+            assert.ok(call.path.endsWith('/reviews') && call.method === 'POST');
+            reviews.push(call.body);
+            return { id: 20 };
+        }),
+        42,
+    );
+
+    assert.equal(await github.approve(target, false), 20);
+    assert.equal(await github.approve(target, true), 20);
+    assert.deepEqual(reviews, [
+        { commit_id: 'head', event: 'APPROVE' },
+        {
+            commit_id: 'head',
+            event: 'APPROVE',
+            body: 'All applicable CI checks passed. Automated approval by Sahaayaka.',
+        },
+    ]);
+});
+
 void test('dismissal discovers orphaned approvals and ignores other reviewers and dismissed reviews', async () => {
     const dismissed: string[] = [];
     const github = new GitHub(
@@ -226,15 +258,92 @@ void test('dismissal discovers orphaned approvals and ignores other reviewers an
     assert.equal(dismissed.length, 1);
 });
 
-void test('policy is loaded from the trusted base commit', async () => {
+function policyFile(contents: string): { type: string; encoding: string; content: string } {
+    return { type: 'file', encoding: 'base64', content: Buffer.from(contents).toString('base64') };
+}
+
+void test('repository policy is loaded from the trusted base commit when owner defaults are absent', async () => {
     const github = new GitHub(
         client((call) => {
+            if (call.path.startsWith('/repos/owner/.github/')) {
+                return new Response(null, { status: 404 });
+            }
             assert.equal(call.query.get('ref'), 'base');
-            return { type: 'file', encoding: 'base64', content: Buffer.from('{"approve":true}').toString('base64') };
+            return policyFile('{"approve":true}');
         }),
         42,
     );
     assert.equal((await github.policy(target)).approve, true);
+});
+
+void test('owner defaults apply per key and repository arrays replace inherited arrays', async () => {
+    let repositoryPolicy = '{"allowEmpty":false,"allowedConclusions":["success","neutral"],"requiredChecks":[]}';
+    const github = new GitHub(
+        client((call) => {
+            const suffix = '/contents/.github/sahaayaka.json';
+            if (decodeURIComponent(call.path) === `/repos/owner/.github${suffix}`) {
+                assert.equal(call.query.has('ref'), false);
+
+                return policyFile(
+                    '{"approve":true,"commentOnApproval":false,"settleSeconds":20,"timeoutSeconds":600,"allowEmpty":true,' +
+                        '"allowedConclusions":["success"],"requiredChecks":[{"name":"owner CI"}]}',
+                );
+            }
+
+            assert.equal(decodeURIComponent(call.path), `/repos/owner/repo${suffix}`);
+            assert.equal(call.query.get('ref'), 'base');
+
+            return policyFile(repositoryPolicy);
+        }),
+        42,
+    );
+
+    assert.deepEqual(await github.policy(target), {
+        approve: true,
+        commentOnApproval: false,
+        settleSeconds: 20,
+        timeoutSeconds: 600,
+        allowEmpty: false,
+        allowedConclusions: ['success', 'neutral'],
+        requiredChecks: [],
+    });
+
+    repositoryPolicy = '{"approve":false}';
+    const policy = await github.policy(target);
+    assert.equal(policy.approve, false);
+    assert.deepEqual(policy.requiredChecks, [{ name: 'owner CI' }]);
+});
+
+void test('missing repository policy inherits owner defaults or uses built-in defaults', async () => {
+    let ownerPolicy = '{"approve":true,"requiredChecks":[{"name":"CI"}]}';
+    const github = new GitHub(
+        client((call) =>
+            call.path.startsWith('/repos/owner/.github/') && ownerPolicy
+                ? policyFile(ownerPolicy)
+                : new Response(null, { status: 404 }),
+        ),
+        42,
+    );
+
+    assert.deepEqual(await github.policy(target), policySchema.parse(JSON.parse(ownerPolicy)));
+    ownerPolicy = '';
+    assert.deepEqual(await github.policy(target), policySchema.parse({}));
+});
+
+void test('an invalid policy layer fails even if the other layer supplies a valid value', async () => {
+    for (const invalidRepo of ['.github', 'repo']) {
+        const github = new GitHub(
+            client((call) =>
+                policyFile(
+                    call.path.startsWith(`/repos/owner/${invalidRepo}/`) ? '{"approve":"yes"}' : '{"approve":false}',
+                ),
+            ),
+            42,
+        );
+
+        // eslint-disable-next-line no-await-in-loop
+        await assert.rejects(github.policy(target), /approve/u);
+    }
 });
 
 void test('Actions suites are resolved across source and synthetic merge commit references', async () => {

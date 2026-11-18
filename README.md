@@ -96,9 +96,21 @@ and repository access changes, and every five minutes. Merge queues
 
 ## Repository policy
 
-Configuration is optional. The app reads `.github/sahaayaka.json` from the PR's
-**base branch tip**. Land policy changes on the base branch before relying on
-them in other PRs. Invalid policy, including unknown fields, fails the gate.
+Configuration is optional. Sahaayaka applies built-in defaults, then owner-wide
+defaults, then repository overrides. Each layer overrides individual keys.
+
+- Put owner-wide defaults in `.github/sahaayaka.json` on the default branch of
+  `OWNER/.github`. For example, `{"approve": true}` in `sjinks/.github` enables
+  automatic approval by default for repositories owned by `sjinks`. The GitHub
+  App needs read access to the defaults repository.
+- Put repository overrides in `.github/sahaayaka.json` on the PR's **base
+  branch**. The app reads the file from the base commit it evaluates. A
+  repository can set `"approve": false` or omit the key to inherit its default.
+- Arrays replace the entire inherited value. For example, `"requiredChecks": []`
+  clears inherited requirements.
+
+All policy keys are available at both levels. A missing file contributes no
+settings. An invalid file, including one with unknown keys, fails evaluation.
 
 This example expects a `test` job for source, test, dependency, or GitHub configuration
 changes and a `lint` job for TypeScript or ESLint configuration changes. A
@@ -107,6 +119,7 @@ docs-only PR can pass when no CI runs and no requirement applies.
 ```json
 {
     "approve": false,
+    "commentOnApproval": true,
     "settleSeconds": 30,
     "timeoutSeconds": 3600,
     "allowEmpty": true,
@@ -245,6 +258,10 @@ commit. The app records its review ID and dismisses its approval when the gate
 stops passing or the revision changes. It does not request changes or merge PRs.
 Repository rules determine whether a bot approval satisfies review requirements.
 The required aggregate check remains the CI merge gate.
+
+Set `"commentOnApproval": false` in owner-wide defaults or repository policy to
+submit new approving reviews without the message. The setting defaults to
+`true`.
 
 Enable GitHub's stale-approval dismissal for new commits as well. Review dismissal
 must be permitted for the app; a failure to dismiss fails the CI gate. Keep

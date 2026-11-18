@@ -1,4 +1,4 @@
-import { type Policy, policySchema } from './policy.js';
+import { type Policy, type PolicyOverrides, policyOverridesSchema, policySchema } from './policy.js';
 import type { Check, Octokit, Repository, Snapshot, Target } from './types.js';
 
 export const CHECK_NAME = 'Sahaayaka';
@@ -18,7 +18,7 @@ export interface Gateway {
     snapshot(target: Target, pull: Pull): Promise<Snapshot>;
     create(target: Target): Promise<number>;
     publish(target: Target, state: 'pending' | 'success' | 'failure', summary: string): Promise<number>;
-    approve(target: Target): Promise<number>;
+    approve(target: Target, commentOnApproval: boolean): Promise<number>;
     dismiss(target: Target): Promise<void>;
 }
 
@@ -97,19 +97,28 @@ export class GitHub implements Gateway {
     }
 
     public async policy(target: Target): Promise<Policy> {
+        const [ownerDefaults, repositoryPolicy] = await Promise.all([
+            this.readPolicy({ owner: target.owner, repo: '.github' }),
+            this.readPolicy(this.repo(target), target.baseSha),
+        ]);
+
+        return policySchema.parse({ ...ownerDefaults, ...repositoryPolicy });
+    }
+
+    private async readPolicy(repository: Repository, ref?: string): Promise<PolicyOverrides> {
         try {
             const { data } = await this.octokit.rest.repos.getContent({
-                ...this.repo(target),
+                ...repository,
                 path: '.github/sahaayaka.json',
-                ref: target.baseSha,
+                ...(ref === undefined ? {} : { ref }),
             });
             if (!('content' in data) || data.encoding !== 'base64') {
                 throw new Error('Policy must be a JSON file.');
             }
-            return policySchema.parse(JSON.parse(Buffer.from(data.content, 'base64').toString('utf8')));
+            return policyOverridesSchema.parse(JSON.parse(Buffer.from(data.content, 'base64').toString('utf8')));
         } catch (error) {
             if (error instanceof Error && 'status' in error && error.status === 404) {
-                return policySchema.parse({});
+                return {};
             }
             throw error;
         }
@@ -261,7 +270,7 @@ export class GitHub implements Gateway {
         return numericId(data.id);
     }
 
-    public async approve(target: Target): Promise<number> {
+    public async approve(target: Target, commentOnApproval: boolean): Promise<number> {
         const reviews = await this.octokit.paginate(this.octokit.rest.pulls.listReviews, {
             ...this.repo(target),
             pull_number: target.pullNumber,
@@ -280,7 +289,7 @@ export class GitHub implements Gateway {
             pull_number: target.pullNumber,
             commit_id: target.headSha,
             event: 'APPROVE',
-            body: 'All applicable CI checks passed. Automated approval by Sahaayaka.',
+            ...(commentOnApproval ? { body: 'All applicable CI checks passed. Automated approval by Sahaayaka.' } : {}),
         });
         return numericId(data.id);
     }
