@@ -1,0 +1,35 @@
+{
+  "name": "sahaayaka",
+  "version": "2.0.0",
+  "private": true,
+  "description": "A single required GitHub check for conditional CI",
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node --env-file-if-exists=.env dist/src/main.js",
+    "dev": "node --env-file-if-exists=.env --import tsx src/main.ts",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "tsx --test test/*.test.ts",
+    "check": "npm run build && npm run lint && npm test",
+    "compile": "bun build --compile --no-compile-autoload-bunfig --outfile=sahaayaka --minify src/main.ts"
+  },
+  "dependencies": {
+    "minimatch": "^11.0.9",
+    "probot": "^14.3.7",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@myrotvorets/eslint-config-myrotvorets-ts": "^4.0.0",
+    "@types/node": "^24.10.0",
+    "eslint": "^10.15.0",
+    "prettier": "^3.10.1",
+    "smee-client": "^5.0.0",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3"
+  },
+  "license": "MIT"
+}

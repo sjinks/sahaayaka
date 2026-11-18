@@ -1,0 +1,20 @@
+name: Sahaayaka
+description: A single required check for conditional CI
+url: https://github.com/apps/sahaayaka
+public: false
+default_events:
+  - pull_request
+  - check_run
+  - check_suite
+  - workflow_run
+  - status
+# GitHub delivers installation and installation_repositories events automatically.
+default_permissions:
+  checks: write
+  actions: read
+  contents: read
+  statuses: read
+  pull_requests: write
+  metadata: read
+# For optional automatic approval and dismissal, set pull_requests to write
+# in the GitHub App settings, then approve the updated installation permissions.
