@@ -1,6 +1,17 @@
+import { ProbotOctokit } from 'probot';
+
 const BASE_DELAY_MS = 1_000;
 const MAX_DELAY_MS = 300_000;
 const RATE_LIMIT_FALLBACK_MS = 60_000;
+
+export const SahaayakaOctokit = ProbotOctokit.defaults({
+    throttle: {
+        onRateLimit: () => false,
+        onSecondaryRateLimit: () => false,
+    },
+    // Retain Octokit's default exclusions and send HTTP 429 to the work queue.
+    retry: { doNotRetry: [400, 401, 403, 404, 410, 422, 429, 451] },
+});
 
 interface ApiError {
     status?: unknown;

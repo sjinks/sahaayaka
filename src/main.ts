@@ -4,6 +4,7 @@ import { createNodeMiddleware, createProbot } from 'probot';
 import { type Runtime, register } from './app.js';
 import { Health } from './health.js';
 import { Maintenance } from './maintenance.js';
+import { SahaayakaOctokit } from './retry.js';
 import { readSettings } from './settings.js';
 import { Store } from './store.js';
 
@@ -24,7 +25,7 @@ if (process.env.NODE_ENV === 'production' && !webhookSecret) {
     throw new Error('Set WEBHOOK_SECRET or WEBHOOK_SECRET_FILE in production.');
 }
 
-const probot = createProbot({ overrides: { secret: webhookSecret ?? '' } });
+const probot = createProbot({ overrides: { secret: webhookSecret ?? '', Octokit: SahaayakaOctokit } });
 await probot.ready();
 
 const store = new Store(process.env.DATABASE_PATH ?? './data/sahaayaka.sqlite');

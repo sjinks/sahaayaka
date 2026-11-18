@@ -1,6 +1,50 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { RetryPolicy, isRateLimitError } from '../src/retry.js';
+import { Probot } from 'probot';
+import { RetryPolicy, SahaayakaOctokit, isRateLimitError } from '../src/retry.js';
+
+for (const { name, status, message, headers } of [
+    {
+        name: 'primary rate limit',
+        status: 403,
+        message: 'API rate limit exceeded',
+        headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(Math.floor(Date.now() / 1_000) + 2) },
+    },
+    {
+        name: 'secondary rate limit',
+        status: 403,
+        message: 'You have exceeded a secondary rate limit.',
+        headers: { 'retry-after': '1' },
+    },
+    {
+        name: 'HTTP 429',
+        status: 429,
+        message: 'Too many requests',
+        headers: { 'retry-after': '1' },
+    },
+]) {
+    void test(`Probot passes ${name} to the work queue without retrying`, async () => {
+        let attempts = 0;
+        const app = new Probot({
+            githubToken: 'test',
+            Octokit: SahaayakaOctokit,
+            logLevel: 'silent',
+            request: {
+                fetch: (input: Parameters<typeof globalThis.fetch>[0]): Promise<Response> => {
+                    attempts += 1;
+                    assert.equal(attempts, 1, 'Octokit retried a rate-limited request');
+                    const response = Response.json({ message }, { status, headers });
+                    Object.defineProperty(response, 'url', { value: input instanceof Request ? input.url : input });
+                    return Promise.resolve(response);
+                },
+            },
+        });
+        await app.ready();
+        const octokit = await app.auth(1);
+        await assert.rejects(octokit.rest.repos.get({ owner: 'owner', repo: 'repo' }), isRateLimitError);
+        assert.equal(attempts, 1);
+    });
+}
 
 void test('per-key retries grow exponentially and remain bounded', () => {
     let now = 0;

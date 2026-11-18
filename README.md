@@ -215,6 +215,9 @@ priority over polling, with a background turn after eight webhook turns to
 prevent starvation. Work is deduplicated per PR. Failed requests use bounded
 exponential backoff; GitHub rate-limit responses honor `Retry-After` and primary
 quota reset times through a shared cooldown for discovery and reconciliation.
+Probot passes rate-limit errors to the scheduler so the worker can release
+the request while waiting. Increase `RECONCILE_INTERVAL_MS` to reduce fallback
+polling. Webhook-triggered evaluations still queue immediately.
 Rate limiting delays evaluation without publishing a false CI failure or
 withdrawing an approval solely because GitHub is temporarily unavailable.
 Logs identify the affected PR target.
