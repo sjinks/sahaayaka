@@ -42,6 +42,14 @@ export function register(
         return repositories === undefined || repositories.has(`${owner}/${repo}`.toLowerCase());
     }
 
+    function shouldReconcile(target: Target): boolean {
+        return (
+            (!target.closed || target.closedChecksFinalized !== true) &&
+            accepts(target.owner, target.repo) &&
+            store.canAccess(target.installationId, target.repositoryId)
+        );
+    }
+
     async function work(): Promise<void> {
         for (;;) {
             if (stopping) {
@@ -52,12 +60,7 @@ export function register(
                 return;
             }
             const target = store.get(key);
-            if (
-                !target ||
-                target.closed ||
-                !accepts(target.owner, target.repo) ||
-                !store.canAccess(target.installationId, target.repositoryId)
-            ) {
+            if (!target || !shouldReconcile(target)) {
                 retry.success(key);
                 continue;
             }
@@ -143,12 +146,7 @@ export function register(
     // Poll persisted targets without turning deferred retries into new attempts.
     function reconcileAll(): void {
         for (const target of store.all()) {
-            if (
-                !target.closed &&
-                accepts(target.owner, target.repo) &&
-                store.canAccess(target.installationId, target.repositoryId) &&
-                retry.dueAt(target.key) <= Date.now()
-            ) {
+            if (shouldReconcile(target) && retry.dueAt(target.key) <= Date.now()) {
                 enqueue(target.key, false);
             }
         }

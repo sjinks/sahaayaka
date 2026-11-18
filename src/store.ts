@@ -23,6 +23,7 @@ const targetSchema = z.object({
     signature: z.string().nullable(),
     snapshotHash: z.string().nullable(),
     closed: z.boolean(),
+    closedChecksFinalized: z.boolean().optional(),
 });
 
 export class Store {

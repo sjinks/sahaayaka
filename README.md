@@ -187,6 +187,10 @@ After a completed result, returning to pending creates a new check run with the
 same required name. GitHub retains a completed conclusion when only its status
 is updated. Sahaayaka recovers interrupted creations by external ID.
 
+When a PR closes or merges, Sahaayaka cancels its unfinished aggregate checks
+on the last tracked head commit and preserves completed results. It retries
+interrupted cancellations for closed PRs still in its tracking database.
+
 One serialized worker handles webhook and polling updates, and generation checks
 discard evaluations invalidated while awaiting GitHub. The PR revision is checked
 again before publishing a result.

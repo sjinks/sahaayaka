@@ -97,6 +97,10 @@ function fakeGateway(): {
             assert.ok(target.checkId !== null);
             return Promise.resolve(target.checkId);
         },
+        cancelPendingChecks() {
+            calls.push('cancelPendingChecks');
+            return Promise.resolve();
+        },
         approve() {
             calls.push('approve');
             return Promise.resolve(20);
@@ -120,6 +124,46 @@ function fakeGateway(): {
         },
     };
 }
+
+void test('closed targets retry check cancellation and finalize only after it succeeds', async (t) => {
+    const { store } = fixture(t);
+    const engine = new Engine(store);
+    const { gateway, setPull, calls } = fakeGateway();
+    store.put({ ...target(), closed: true, checkId: 10 });
+    setPull({ closed: true });
+    const error = new Error('Check cancellation failed');
+    t.mock.method(gateway, 'cancelPendingChecks', () => Promise.reject(error), { times: 1 });
+
+    await assert.rejects(engine.reconcile('1:2', gateway), error);
+    assert.equal(store.get('1:2')?.closedChecksFinalized, undefined);
+    await engine.reconcile('1:2', gateway);
+    assert.equal(store.get('1:2')?.closedChecksFinalized, true);
+    await engine.reconcile('1:2', gateway);
+    assert.deepEqual(calls, ['pull', 'pull', 'cancelPendingChecks']);
+});
+
+void test('reopening a pull request invalidates an in-flight cancellation', async (t) => {
+    const { store } = fixture(t);
+    const engine = new Engine(store);
+    const { gateway, setPull } = fakeGateway();
+    const cancellation = deferred<() => boolean>();
+    const resume = deferred<undefined>();
+    setPull({ closed: true });
+    t.mock.method(gateway, 'cancelPendingChecks', async (_target: Target, stillClosed: () => boolean) => {
+        cancellation.resolve(stillClosed);
+        await resume.promise;
+        assert.equal(stillClosed(), false);
+    });
+
+    const reconcile = engine.reconcile('1:2', gateway);
+    const stillClosed = await cancellation.promise;
+    assert.equal(stillClosed(), true);
+    engine.invalidate('1:2');
+    resume.resolve(undefined);
+    await reconcile;
+    assert.equal(store.get('1:2')?.closed, false);
+    assert.equal(store.get('1:2')?.closedChecksFinalized, false);
+});
 
 void test('generation invalidation during an awaited snapshot suppresses stale success', async (t) => {
     const { store } = fixture(t);

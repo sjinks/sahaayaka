@@ -29,6 +29,7 @@ void test('webhooks and polling keep the aggregate check current across reopen',
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const store = new Store(join(dir, 'state.sqlite'));
     let pullState = 'open';
+    let baseSha = 'base';
     let status: 'absent' | 'pending' | 'success' | 'failure' = 'absent';
     const checkRuns = new Map<number, RemoteCheck>();
     let nextCheckId = 10;
@@ -74,7 +75,7 @@ void test('webhooks and polling keep the aggregate check current across reopen',
             };
         }
         if (call.path.endsWith('/branches/main')) {
-            return { commit: { sha: 'base' } };
+            return { commit: { sha: baseSha } };
         }
         if (call.path.endsWith('/pulls/2/files')) {
             return [{ filename: 'src/main.ts' }];
@@ -251,14 +252,28 @@ void test('webhooks and polling keep the aggregate check current across reopen',
     assert.equal(newestCheck().id, 11);
     assert.equal(newestCheck().conclusion, 'failure');
 
+    status = 'pending';
+    baseSha = 'advanced-base';
+    t.mock.timers.tick(10_000);
+    await runtime.drain();
+    assert.equal(newestCheck().id, 12);
+    assert.equal(newestCheck().status, 'in_progress');
+    assert.equal(newestCheck().external_id, '1:2:head:advanced-base');
+
     pullState = 'closed';
     await receive('pull_request', 'closed', { pull_request: pullRequest });
     assert.equal(store.get('1:2')?.closed, true);
+    assert.equal(store.get('1:2')?.closedChecksFinalized, true);
+    assert.equal(newestCheck().conclusion, 'cancelled');
+    assert.equal(checkRuns.get(10)?.conclusion, 'success');
+    assert.equal(checkRuns.get(11)?.conclusion, 'failure');
+
     pullState = 'open';
+    status = 'failure';
     await receive('pull_request', 'reopened', { pull_request: pullRequest });
     assert.equal(store.get('1:2')?.closed, false);
     assert.equal(published().at(-1), 'failure');
-    assert.equal(newestCheck().id, 12);
-    assert.equal(store.get('1:2')?.checkId, 12);
+    assert.equal(newestCheck().id, 13);
+    assert.equal(store.get('1:2')?.checkId, 13);
     assert.deepEqual(unexpected, []);
 });

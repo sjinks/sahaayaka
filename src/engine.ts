@@ -26,6 +26,7 @@ export class Engine {
                 activityAt: this.now(),
                 startedAt: terminal ? this.now() : target.startedAt,
                 closed: false,
+                closedChecksFinalized: false,
             });
         }
     }
@@ -34,23 +35,27 @@ export class Engine {
         const current = this.store.get(target.key);
         return (
             current?.generation === target.generation &&
-            !current.closed &&
+            current.closed === target.closed &&
             this.store.canAccess(target.installationId, target.repositoryId)
         );
     }
 
     public async reconcile(key: string, github: Gateway): Promise<void> {
         let target = this.store.get(key);
-        if (!target || target.closed || !this.store.canAccess(target.installationId, target.repositoryId)) {
+        if (
+            !target ||
+            (target.closed && target.closedChecksFinalized === true) ||
+            !this.store.canAccess(target.installationId, target.repositoryId)
+        ) {
             return;
         }
         try {
             const pull = await github.pull(target);
-            if (!this.current(target)) {
+            if (pull.closed) {
+                await this.close(target, github);
                 return;
             }
-            if (pull.closed) {
-                this.store.put({ ...target, closed: true });
+            if (target.closed || !this.current(target)) {
                 return;
             }
             const preparedTarget = await this.prepare(target, pull, github);
@@ -75,7 +80,11 @@ export class Engine {
             // Re-read the PR before publishing; delayed events must not move an
             // evaluation of an older revision onto the current revision.
             const freshPull = await github.pull(target);
-            if (!this.current(target) || revisionChanged(target, freshPull) || freshPull.closed) {
+            if (freshPull.closed) {
+                await this.close(target, github);
+                return;
+            }
+            if (!this.current(target) || revisionChanged(target, freshPull)) {
                 return;
             }
             await this.finish(target, github, outcome, {
@@ -90,8 +99,21 @@ export class Engine {
         }
     }
 
+    private async close(target: Target, github: Gateway): Promise<void> {
+        if (!this.current(target)) {
+            return;
+        }
+        const closedTarget = { ...target, closed: true };
+        this.store.put(closedTarget);
+        const stillClosed = (): boolean => this.current(closedTarget);
+        await github.cancelPendingChecks(closedTarget, stillClosed);
+        if (stillClosed()) {
+            this.store.put({ ...closedTarget, closedChecksFinalized: true });
+        }
+    }
+
     private async fail(target: Target, github: Gateway): Promise<void> {
-        if (!this.current(target) || target.checkId === null) {
+        if (target.closed || !this.current(target) || target.checkId === null) {
             return;
         }
         const checkId = await github.publish(

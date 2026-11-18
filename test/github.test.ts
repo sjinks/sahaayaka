@@ -203,6 +203,37 @@ void test('recovering a created check after a crash does not create another chec
     assert.equal(await github.create(target), 25);
 });
 
+void test('closing a pull request cancels only its unfinished checks across base revisions', async () => {
+    const updated: string[] = [];
+    const github = new GitHub(
+        client((call) => {
+            if (call.method === 'GET') {
+                assert.equal(call.path, '/repos/owner/repo/commits/head/check-runs');
+                assert.equal(call.query.get('app_id'), '42');
+                assert.equal(call.query.get('filter'), 'all');
+                return {
+                    total_count: 4,
+                    check_runs: [
+                        { id: 10, name: 'Sahaayaka', external_id: '1:2:head:base', status: 'completed' },
+                        { id: 11, name: 'Sahaayaka', external_id: '1:2:head:next', status: 'in_progress' },
+                        { id: 12, name: 'Sahaayaka', external_id: '1:3:head:base', status: 'in_progress' },
+                        { id: 13, name: 'Another check', external_id: '1:2:head:next', status: 'queued' },
+                    ],
+                };
+            }
+            assert.equal(call.method, 'PATCH');
+            assert.ok(typeof call.body === 'object' && call.body !== null && 'conclusion' in call.body);
+            assert.equal(call.body.conclusion, 'cancelled');
+            updated.push(call.path);
+            return { id: 11 };
+        }),
+        42,
+    );
+
+    await github.cancelPendingChecks(target, () => true);
+    assert.deepEqual(updated, ['/repos/owner/repo/check-runs/11']);
+});
+
 void test('approval can omit the review message while targeting the same commit', async () => {
     const reviews: unknown[] = [];
     const github = new GitHub(
