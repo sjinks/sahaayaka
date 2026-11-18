@@ -53,10 +53,11 @@ export class Engine {
                 this.store.put({ ...target, closed: true });
                 return;
             }
-            target = await this.prepare(target, pull, github);
-            if (!target) {
+            const preparedTarget = await this.prepare(target, pull, github);
+            if (!preparedTarget) {
                 return;
             }
+            target = preparedTarget;
             const policy = await github.policy(target);
             const snapshot = await github.snapshot(target, pull);
             if (!this.current(target)) {
@@ -79,7 +80,7 @@ export class Engine {
             }
             await this.finish(target, github, outcome, policy.approve && !freshPull.draft);
         } catch (error) {
-            if (target && !isRateLimitError(error)) {
+            if (!isRateLimitError(error)) {
                 await this.fail(target, github);
             }
             throw error;
