@@ -20,4 +20,7 @@ jobs:
       - name: Review dependencies
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
-          comment-summary-in-pr: true
+          # Fork and Dependabot PRs use the job summary because their tokens are read-only.
+          comment-summary-in-pr: >-
+            ${{ github.event.pull_request.head.repo.full_name == github.repository
+                && github.actor != 'dependabot[bot]' && 'always' || 'never' }}
