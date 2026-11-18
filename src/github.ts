@@ -1,7 +1,8 @@
 import { type Policy, type PolicyOverrides, policyOverridesSchema, policySchema } from './policy.js';
-import type { Check, Octokit, Repository, Snapshot, Target } from './types.js';
+import type { Check, Octokit, Outcome, Repository, Snapshot, Target } from './types.js';
 
 export const CHECK_NAME = 'Sahaayaka';
+type CheckState = Outcome['state'] | 'cancelled';
 
 export interface Pull {
     headSha: string;
@@ -17,7 +18,8 @@ export interface Gateway {
     policy(target: Target): Promise<Policy>;
     snapshot(target: Target, pull: Pull): Promise<Snapshot>;
     create(target: Target): Promise<number>;
-    publish(target: Target, state: 'pending' | 'success' | 'failure', summary: string): Promise<number>;
+    publish(target: Target, state: CheckState, summary: string): Promise<number>;
+    cancelPendingChecks(target: Target, stillClosed: () => boolean): Promise<void>;
     approve(target: Target, commentOnApproval: boolean): Promise<number>;
     dismiss(target: Target): Promise<void>;
 }
@@ -215,15 +217,41 @@ export class GitHub implements Gateway {
         return checks;
     }
 
-    public async create(target: Target, pendingOnly = false): Promise<number> {
-        // Recover a check created immediately before a crash, avoiding duplicates.
-        const checks = await this.octokit.paginate(this.octokit.rest.checks.listForRef, {
+    private async listOwnChecks(target: Target): Promise<CheckRun[]> {
+        return this.octokit.paginate(this.octokit.rest.checks.listForRef, {
             ...this.repo(target),
             ref: target.headSha,
             app_id: this.appId,
             filter: 'all',
             per_page: 100,
         });
+    }
+
+    public async cancelPendingChecks(target: Target, stillClosed: () => boolean): Promise<void> {
+        const checks = await this.listOwnChecks(target);
+        const externalIdPrefix = `${target.key}:${target.headSha}:`;
+        const pending = checks.filter(
+            (check) =>
+                check.name === CHECK_NAME &&
+                check.status !== 'completed' &&
+                check.external_id?.startsWith(externalIdPrefix) === true,
+        );
+        for (const check of pending) {
+            if (!stillClosed()) {
+                return;
+            }
+            // eslint-disable-next-line no-await-in-loop
+            await this.publish(
+                { ...target, checkId: numericId(check.id) },
+                'cancelled',
+                'The pull request closed before CI evaluation finished.',
+            );
+        }
+    }
+
+    public async create(target: Target, pendingOnly = false): Promise<number> {
+        // Recover a check created immediately before a crash, avoiding duplicates.
+        const checks = await this.listOwnChecks(target);
         const externalId = `${target.key}:${target.headSha}:${target.baseSha}`;
         const existing = checks
             .filter((check) => check.name === CHECK_NAME && check.external_id === externalId)
@@ -242,7 +270,7 @@ export class GitHub implements Gateway {
         return numericId(data.id);
     }
 
-    public async publish(target: Target, state: 'pending' | 'success' | 'failure', summary: string): Promise<number> {
+    public async publish(target: Target, state: CheckState, summary: string): Promise<number> {
         if (target.checkId === null) {
             throw new Error('Cannot publish without an aggregate check.');
         }
@@ -255,7 +283,12 @@ export class GitHub implements Gateway {
                 checkId = await this.create(target, true);
             }
         }
-        const titles = { success: 'CI passed', failure: 'CI failed', pending: 'Waiting for CI' };
+        const titles = {
+            success: 'CI passed',
+            failure: 'CI failed',
+            pending: 'Waiting for CI',
+            cancelled: 'CI evaluation cancelled',
+        };
         const { data } = await this.octokit.rest.checks.update({
             ...this.repo(target),
             check_run_id: checkId,

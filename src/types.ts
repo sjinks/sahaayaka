@@ -24,6 +24,7 @@ export interface Target extends Repository {
     signature: string | null;
     snapshotHash: string | null;
     closed: boolean;
+    closedChecksFinalized?: boolean | undefined;
 }
 
 export interface Check {
